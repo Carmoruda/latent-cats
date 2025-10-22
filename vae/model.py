@@ -2,6 +2,7 @@ from pathlib import Path
 from typing import Optional, Union
 
 import torch
+from torch.nn import functional as F
 
 DEVICE = None
 """Device in which to run the model."""
@@ -55,10 +56,12 @@ class VAE(torch.nn.Module):
 
         # Layers for the mean and log-variance of the latent space
         self.fc_mu = torch.nn.Linear(128 * 8 * 8, latent_dim)
-        self.fc_logvar = torch.nn.Linear(128 * 8 * 8, latent_dim)
+        self.fc_L_params = torch.nn.Sequential(
+            torch.nn.Linear(128 * 8 * 8, latent_dim * (latent_dim + 1) // 2),
+            torch.nn.LayerNorm(latent_dim * (latent_dim + 1) // 2),
+        )
 
         # Decoder
-        self.decoder_input = torch.nn.Linear(latent_dim, 128 * 8 * 8)
         self.decoder = torch.nn.Sequential(
             torch.nn.Unflatten(1, (128, 8, 8)),
             torch.nn.ConvTranspose2d(
@@ -75,9 +78,48 @@ class VAE(torch.nn.Module):
             torch.nn.Sigmoid(),  # Output values between [0, 1]
         )
 
-    def reparameterize(self, mu: torch.Tensor, logvar: torch.Tensor) -> torch.Tensor: ...
+    def reparameterize(
+        self, mu: torch.Tensor, L_params: torch.Tensor
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        """Sample latent vectors using the reparameterization trick.
 
-    def build_L(self, L_params: torch.Tensor, latent_dim: int) -> torch.Tensor: ...
+        Args:
+            mu (torch.Tensor): Mean of the latent Gaussian, shape `(batch, latent_dim)`.
+            L_params (torch.Tensor): Packed lower-triangular entries used to build the Cholesky factor.
+
+        Returns:
+            tuple[torch.Tensor, torch.Tensor]: Sampled latent vectors of shape `(batch, latent_dim)` and the corresponding Cholesky factor `L`.
+        """
+
+        # Build the Cholesky factor L from the packed parameters
+        L = self.build_L(L_params)
+        eps = torch.randn(mu.shape[0], self.latent_dim, 1, device=mu.device)
+        z = mu.unsqueeze(-1) + torch.bmm(L, eps)
+
+        return z.squeeze(-1), L
+
+    def build_L(self, L_params: torch.Tensor) -> torch.Tensor:
+        """Construct the lower-triangular Cholesky factor from flattened parameters.
+
+        Args:
+            L_params (torch.Tensor): Tensor of shape `(batch, latent_dim * (latent_dim + 1) // 2)` containing the packed lower-triangular entries for each sample.
+
+        Returns:
+            torch.Tensor: Batch of lower-triangular matrices `L` with positive diagonal, shape `(batch, latent_dim, latent_dim)`.
+        """
+        # Construct the lower-triangular matrix
+        batch_size = L_params.size(0)
+        L = torch.zeros(batch_size, self.latent_dim, self.latent_dim, device=L_params.device)
+
+        # Get the indices for the lower-triangular part
+        row_idx, col_idx = torch.tril_indices(row=self.latent_dim, col=self.latent_dim, offset=0)
+        L[:, row_idx, col_idx] = L_params
+
+        # Enforce a positive diagonal for numerical stability.
+        diag_idx = torch.arange(self.latent_dim)
+        L[:, diag_idx, diag_idx] = torch.exp(L[:, diag_idx, diag_idx])
+
+        return L
 
     def forward(self, x: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         """Forward pass through the VAE.
@@ -86,24 +128,53 @@ class VAE(torch.nn.Module):
             x (torch.Tensor): Input tensor.
 
         Returns:
-            tuple[torch.Tensor, torch.Tensor, torch.Tensor]: Reconstructed image, mean, and log-variance.
+            tuple[torch.Tensor, torch.Tensor, torch.Tensor]: Reconstructed image, mean, and Cholensky factor.
         """
         # Encode the input
         x = self.encoder(x)
 
         # Get the mean and log-variance
         mu = self.fc_mu(x)
-        logvar = self.fc_logvar(x)
+        L_params = self.fc_L_params(x)
 
         # Reparameterize to get the latent vector
-        z = self.reparameterize(mu, logvar)
+        z, L = self.reparameterize(mu, L_params)
 
         # Decode the latent vector
         # (First expand it to match the decoder input size)
-        z_expanded = self.decoder_input(z)
-        reconstructed = self.decoder(z_expanded)
+        reconstructed = self.decoder(z)
 
-        return reconstructed, mu, logvar
+        return reconstructed, mu, L
+
+    def loss(
+        self, reconstructed_x: torch.Tensor, x: torch.Tensor, mu: torch.Tensor, L: torch.Tensor
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        """Compute VAE reconstruction and KL losses with a Cholesky covariance.
+
+        Args:
+            recon_x (torch.Tensor): Decoder outputs with the same shape as `x`.
+            x (torch.Tensor): Ground truth inputs the VAE is trying to reconstruct.
+            mu (torch.Tensor): Mean of the latent Gaussian, shape `(batch, latent_dim)`.
+            L (torch.Tensor): Lower-triangular Cholesky factor of the covariance, shape `(batch, latent_dim, latent_dim)`.
+            beta (float, optional): Scaling factor applied to the KL term. Defaults to 0.01.
+
+        Returns:
+            tuple[torch.Tensor, torch.Tensor]: Mean-squared reconstruction loss and beta-scaled KL divergence loss.
+        """
+        recon_loss = F.mse_loss(reconstructed_x, x, reduction="mean")
+
+        diag_L = torch.diagonal(L, dim1=1, dim2=2)
+        log_diag_L = torch.log(diag_L)
+        log_det_sigma = 2 * torch.sum(log_diag_L, dim=1)
+
+        trace_sigma = torch.sum(L.pow(2), dim=(1, 2))
+        squared_mean = torch.sum(mu.pow(2), dim=1)
+        latent_dim = mu.size(1)
+
+        kl_div = 0.5 * (trace_sigma + squared_mean - latent_dim - log_det_sigma)
+        kl_loss = torch.mean(kl_div)
+
+        return recon_loss, (kl_loss * self.beta)
 
     @classmethod
     def load_from_checkpoint(
