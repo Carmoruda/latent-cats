@@ -62,6 +62,7 @@ class VAE(torch.nn.Module):
         )
 
         # Decoder
+        self.decoder_input = torch.nn.Linear(latent_dim, 128 * 8 * 8)
         self.decoder = torch.nn.Sequential(
             torch.nn.Unflatten(1, (128, 8, 8)),
             torch.nn.ConvTranspose2d(
@@ -142,7 +143,8 @@ class VAE(torch.nn.Module):
 
         # Decode the latent vector
         # (First expand it to match the decoder input size)
-        reconstructed = self.decoder(z)
+        z_expanded = self.decoder_input(z)
+        reconstructed = self.decoder(z_expanded)
 
         return reconstructed, mu, L
 
