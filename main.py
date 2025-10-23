@@ -1,69 +1,37 @@
 from pathlib import Path
+from typing import Any, Mapping
 
-import torch
+import torch.nn.functional as F
 from ray import train, tune
 from ray.tune.schedulers import ASHAScheduler
-from torch.optim.lr_scheduler import ReduceLROnPlateau
-from torch.utils.data import DataLoader, random_split
-from torchvision import transforms
 
-from vae import VAE, VAEDataset
-from vae.model import BATCH_SIZE, DEVICE
+from utils import load_config_from_yaml, seed_everything
+from utils import training as training_utils
+from vae.model import DEVICE
 
 
-def train_vae(config, report=True):
+def train_vae(config: Mapping[str, Any], report=True):
+    """ "Train a VAE model based on the provided configuration.
+
+    Args:
+        config (Mapping[str, Any]): Configuration dictionary for training.
+        report (bool, optional): Whether to report intermediate results. Defaults to True.
+
+    Returns:
+        tuple[CVAE, DataLoader, DataLoader]: The trained model and the dataloaders.
+    """
+
     data_dir = Path(__file__).parent / "data"
     output_dir = Path(__file__).parent / "output"
 
-    # Create the dataset
-    transform = transforms.Compose(
-        [
-            transforms.Grayscale(num_output_channels=1),
-            transforms.ToTensor(),
-        ]
-    )
-    dataset = VAEDataset(
-        "https://www.kaggle.com/api/v1/datasets/download/borhanitrash/cat-dataset",
-        data_dir,
-        download=False,
-        transform=transform,
-    )
+    report_callback = train.report if report else None
 
-    # Split dataset into training and validation
-    train_size = int(0.8 * len(dataset))
-    val_size = int((len(dataset) - train_size) / 2)
-    test_size = len(dataset) - train_size - val_size
-    train_dataset, val_dataset, test_dataset = random_split(
-        dataset, [train_size, val_size, test_size]
-    )
-
-    train_dataloader = DataLoader(train_dataset, batch_size=BATCH_SIZE, shuffle=True)
-    val_dataloader = DataLoader(val_dataset, batch_size=BATCH_SIZE, shuffle=False)
-    test_dataloader = DataLoader(test_dataset, batch_size=BATCH_SIZE, shuffle=False)
-
-    # Model, Optimizer
-    model = VAE(latent_dim=config["latent_dim"]).to(DEVICE)
-    optimizer = torch.optim.Adam(model.parameters(), lr=config["lr"])
-    scheduler = ReduceLROnPlateau(optimizer, mode="min", factor=0.2, patience=5)
-
-    for current_epoch in range(config["epochs"]):
-        _, val_loss = model.train_model(
-            train_dataloader,
-            val_dataloader,
-            optimizer,
-            scheduler,
-            epoch=current_epoch,
-            num_epochs=config["epochs"],
-        )  # Train for 1 epoch
-
-        # Report metrics to Ray Tune
-        if report:
-            train.report({"loss": val_loss[-1]})
-
-    model.plot_reconstructions(
-        dataloader=DataLoader(val_dataset, batch_size=BATCH_SIZE, shuffle=False),
-        root_path=str(data_dir),
-        file_name=f"{output_dir}/reconstructions.png",
+    model, train_dataloader, _, test_dataloader = training_utils.run_training_pipeline(
+        config,
+        data_dir=data_dir,
+        output_dir=output_dir,
+        report_callback=report_callback,
+        device=DEVICE,
     )
 
     return model, test_dataloader, train_dataloader
@@ -122,20 +90,36 @@ def hyperparameter_tuning():
 
 
 if __name__ == "__main__":
-    # hyperparameter_tuning()
+    config_dir = Path(__file__).parent / "configs/local.yaml"
+    config = load_config_from_yaml(config_dir, overrides=None)
+
+    # Adjust paths to be absolute
+    data_dir = Path(__file__).parent / config.data_dir
+    output_dir = Path(__file__).parent / config.output_dir
+    config = config.with_updates(data_dir=data_dir, output_dir=output_dir)
+
+    config.ensure_directories()
+
+    if config.seed:
+        seed_everything(config.seed)
+
     data_dir = Path(__file__).parent / "data"
     output_dir = Path(__file__).parent / "output"
 
-    model, test_dataloader, train_dataloader = train_vae(
+    model, test_loader, train_loader = train_vae(
         {
-            "lr": 1e-3,
-            "latent_dim": 128,
-            "epochs": 20,
+            "lr": config.learning_rate,
+            "latent_dim": config.latent_dim,
+            "epochs": config.epochs,
+            "loss_function": F.mse_loss,
+            "beta": config.beta,
+            "batch_size": config.batch_size,
+            "seed": config.seed,
+            "download": config.download,
         },
         False,
     )
 
-    # Fit the GMM model
-    model.fit_gmm(train_dataloader)
+    # hyperparameter_tuning()
 
-    model.generate_images(root_path=str(data_dir), file_name=f"{output_dir}/generated.png")
+    training_utils.generate_images(model, root_path=output_dir)
