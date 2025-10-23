@@ -193,7 +193,7 @@ def run_training_pipeline(
             report_callback(metrics)
 
     # Fit gmm
-    gmm(model, train_dataloader, n_samples=1000)
+    gmm(model, train_dataloader)
 
     get_reconstructions(
         model,
@@ -406,7 +406,7 @@ def sample_from_latent_space(mu, L, device):
     return z
 
 
-def gmm(model: VAE, train_dataloader: DataLoader, n_samples: int) -> None:
+def gmm(model: VAE, train_dataloader: DataLoader) -> None:
     """
     Fit a Gaussian Mixture Model (GMM) to the latent representations.
 
@@ -416,36 +416,46 @@ def gmm(model: VAE, train_dataloader: DataLoader, n_samples: int) -> None:
     Args:
         model (VAE): The trained VAE model.
         train_dataloader (DataLoader): DataLoader for the training dataset.
-        n_samples (int): Number of latent samples to generate from the GMM.
 
     Returns:
         torch.Tensor: Latent samples of shape (n_samples, D).
     """
-    device = _get_device(model)
-    model.to(device)
+    model_device = _get_device(model)
+    model.to(model_device)
 
-    mu, L = _get_latent_representations(model, train_dataloader)
+    model.eval()
 
-    N, D = mu.shape
+    with torch.no_grad():
+        mu, L = _get_latent_representations(model, train_dataloader)
 
-    # Convert tensors to NumPy arrays for sklearn compatibility
-    mu_np = mu.detach().cpu().numpy()
-    L_np = L.detach().cpu().numpy()
+        N, D = mu.shape
 
-    # Compute full covariance matrices: Σ_i = L_i * L_iᵀ
-    cov_np = np.matmul(L_np, np.transpose(L_np, (0, 2, 1)))
+        # Convert tensors to NumPy arrays for sklearn compatibility
+        mu_cpu = mu.detach().cpu()
+        L_cpu = L.detach().cpu()
+        mu_np = mu_cpu.numpy()
+        L_np = L_cpu.numpy()
 
-    # Add small regularization to the diagonal for numerical stability
-    eps = 1e-6
-    cov_np += np.eye(D)[None, :, :] * eps
+        # Compute full covariance matrices: Σ_i = L_i * L_iᵀ
+        cov_np = np.matmul(L_np, np.transpose(L_np, (0, 2, 1)))
 
-    # Initialize Gaussian Mixture Model with N components (one per photo)
-    gmm = GaussianMixture(n_components=N, covariance_type="full")
-    gmm.weights_ = np.ones(N) / N  # Equal weights for all components
-    gmm.means_ = mu_np  # Component means
-    gmm.covariances_ = cov_np  # Full covariances per component
+        # Add small regularization to the diagonal for numerical stability
+        eps = 1e-6
+        cov_np += np.eye(D)[None, :, :] * eps
 
-    model.gmm = gmm  # Store GMM in the model for later use
+        cpu_device = torch.device("cpu")
+        z_tensor = sample_from_latent_space(mu_cpu, L_cpu, cpu_device).cpu()
+        z_samples = z_tensor.numpy()
+
+        # Initialize Gaussian Mixture Model with N components (one per photo)
+        gmm = GaussianMixture(n_components=model.n_components, covariance_type="full").fit(z_samples)
+        gmm.weights_ = (
+            np.ones(model.n_components) / model.n_components  # Equal weights for all components
+        )
+        gmm.means_ = mu_np  # Component means
+        gmm.covariances_ = cov_np  # Full covariances per component
+
+        model.gmm = gmm  # Store GMM in the model for later use
 
 
 def _get_device(model: torch.nn.Module, override: Optional[torch.device] = None) -> torch.device:
