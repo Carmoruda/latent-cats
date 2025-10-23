@@ -1,9 +1,10 @@
 from __future__ import annotations
 
-import yaml
 from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any, Dict, Optional, Union, get_args, get_origin, get_type_hints
+
+import yaml
 
 
 @dataclass(frozen=True)
@@ -17,6 +18,7 @@ class Config:
     epochs: int = 20
     image_size: int = 100
     seed: int = 42
+    download: bool = False
 
     def with_updates(self, **updates: Any) -> Config:
         """Return a new Config instance with updated fields.
@@ -61,7 +63,6 @@ class Config:
 
         self.data_dir.mkdir(parents=True, exist_ok=True)
         self.output_dir.mkdir(parents=True, exist_ok=True)
-
 
     @staticmethod
     def _coerce_value(key: str, value: Any, target_type: Any) -> Any:
@@ -127,14 +128,18 @@ class Config:
 
                 return tuple(converted_items)
 
-
         except (TypeError, ValueError) as exc:
-            raise ValueError(f"Cannot convert value for field '{key}' to type '{target_type}'") from exc
+            raise ValueError(
+                f"Cannot convert value for field '{key}' to type '{target_type}'"
+            ) from exc
 
         # If no special handling needed, return the value as is
         return value
 
-def load_config_from_yaml(yaml_path: Union[str, Path], *, overrides: Optional[Dict[str, Any]]) -> Config:
+
+def load_config_from_yaml(
+    yaml_path: Union[str, Path], *, overrides: Optional[Dict[str, Any]]
+) -> Config:
     """Load a ProjectConfig from YAML with optional runtime overrides.
 
     Args:
@@ -178,4 +183,3 @@ def load_config_from_yaml(yaml_path: Union[str, Path], *, overrides: Optional[Di
     base = Config()
 
     return base.with_updates(**config_data)
-
