@@ -10,7 +10,7 @@ from PIL import Image
 from torch.utils.data import Dataset
 from torchvision import transforms
 
-IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".bmp"}
+IMAGE_EXTENSIONS = (".png", ".jpg", ".jpeg", ".bmp")
 """Image file extensions supported by the dataset."""
 
 
@@ -154,10 +154,7 @@ class VAEDataset(Dataset):
         # Search for the folder containing images inside 'extracted'
         data_src: Optional[Path] = None
         for root, _, files in os.walk(extracted_root):
-            if any(
-                file.lower().endswith(IMAGE_EXTENSIONS)
-                for file in files
-            ):
+            if any(file.lower().endswith(IMAGE_EXTENSIONS) for file in files):
                 data_src = Path(root)
                 break
 
@@ -177,9 +174,7 @@ class VAEDataset(Dataset):
             dst_file = data_dst / src_file.name
             if dst_file.exists():
                 dst_file = self._resolve_duplicate_path(dst_file)
-                print(
-                    f"File '{src_file.name}' already exists. Renaming to '{dst_file.name}'."
-                )
+                print(f"File '{src_file.name}' already exists. Renaming to '{dst_file.name}'.")
 
             shutil.move(str(src_file), str(dst_file))
 
