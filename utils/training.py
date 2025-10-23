@@ -4,8 +4,10 @@ from collections.abc import Sized
 from pathlib import Path
 from typing import Any, Callable, Mapping, Optional, cast
 
+import numpy as np
 import torch
 import torch.nn.functional as F
+from sklearn.mixture import GaussianMixture
 from torch.optim.lr_scheduler import ReduceLROnPlateau
 from torch.utils.data import DataLoader, Dataset, Subset, random_split
 from torchvision import transforms
@@ -23,6 +25,7 @@ def prepare_dataloader(
     data_dir: Path,
     *,
     length: Optional[int] = None,
+    image_size: int = 64,
     batch_size: int,
     seed: Optional[int] = None,
     download: bool = False,
@@ -31,8 +34,9 @@ def prepare_dataloader(
 
     Args:
         data_dir (Path): Path to the data directory.
-        batch_size (int): Batch size for the dataloaders.
         length (Optional[int], optional): Length of the dataset. Defaults to None.
+        image_size (int): Size to which images will be resized.
+        batch_size (int): Batch size for the dataloaders.
         seed (Optional[int], optional): Random seed for data splitting. Defaults to None.
         download (bool, optional): Whether to download the dataset if not found. Defaults to False.
 
@@ -43,6 +47,7 @@ def prepare_dataloader(
     transform = transforms.Compose(
         [
             transforms.Grayscale(num_output_channels=1),
+            transforms.Resize((image_size, image_size)),
             transforms.ToTensor(),
         ]
     )
@@ -148,6 +153,7 @@ def run_training_pipeline(
     epochs = int(configuration.get("epochs", 50))
     loss_function = configuration.get("loss_function", F.mse_loss)
     download = bool(configuration.get("download", False))
+    image_size = int(configuration.get("image_size", 128))
 
     # Create the model
     model = VAE(
@@ -161,7 +167,7 @@ def run_training_pipeline(
 
     # Prepare the dataloaders
     train_dataloader, val_dataloader, test_dataloader = prepare_dataloader(
-        data_dir, batch_size=batch_size, seed=seed, download=download
+        data_dir, image_size=image_size, batch_size=batch_size, seed=seed, download=download
     )
 
     # Set up the optimizer and scheduler
@@ -185,6 +191,9 @@ def run_training_pipeline(
         if report_callback:
             metrics = {"val_loss": val_history[-1]}
             report_callback(metrics)
+
+    # Fit gmm
+    gmm(model, train_dataloader, n_samples=1000)
 
     get_reconstructions(
         model,
@@ -324,7 +333,7 @@ def generate_images(
     with torch.no_grad():
         # If the model has a GMM, sample from it
         if hasattr(model, "gmm") and model.gmm is not None:
-            samples = model.gmm.sample(num_images)
+            samples, _ = model.gmm.sample(num_images)
             # Convert samples to torch tensor
             z = torch.from_numpy(samples).float().to(model_device)
         else:
@@ -395,6 +404,48 @@ def sample_from_latent_space(mu, L, device):
     epsilon = torch.randn_like(mu).to(device)  # Standard Gaussian noise ε ~ N(0, I)
     z = mu + torch.bmm(L, epsilon.unsqueeze(-1)).squeeze(-1)  # Reparameterization: z = μ + L·ε
     return z
+
+
+def gmm(model: VAE, train_dataloader: DataLoader, n_samples: int) -> None:
+    """
+    Fit a Gaussian Mixture Model (GMM) to the latent representations.
+
+    Each photo in the dataset is treated as one Gaussian component in the GMM,
+    parameterized by (μ_i, Σ_i = L_i L_iᵀ).
+
+    Args:
+        model (VAE): The trained VAE model.
+        train_dataloader (DataLoader): DataLoader for the training dataset.
+        n_samples (int): Number of latent samples to generate from the GMM.
+
+    Returns:
+        torch.Tensor: Latent samples of shape (n_samples, D).
+    """
+    device = _get_device(model)
+    model.to(device)
+
+    mu, L = _get_latent_representations(model, train_dataloader)
+
+    N, D = mu.shape
+
+    # Convert tensors to NumPy arrays for sklearn compatibility
+    mu_np = mu.detach().cpu().numpy()
+    L_np = L.detach().cpu().numpy()
+
+    # Compute full covariance matrices: Σ_i = L_i * L_iᵀ
+    cov_np = np.matmul(L_np, np.transpose(L_np, (0, 2, 1)))
+
+    # Add small regularization to the diagonal for numerical stability
+    eps = 1e-6
+    cov_np += np.eye(D)[None, :, :] * eps
+
+    # Initialize Gaussian Mixture Model with N components (one per photo)
+    gmm = GaussianMixture(n_components=N, covariance_type="full")
+    gmm.weights_ = np.ones(N) / N  # Equal weights for all components
+    gmm.means_ = mu_np  # Component means
+    gmm.covariances_ = cov_np  # Full covariances per component
+
+    model.gmm = gmm  # Store GMM in the model for later use
 
 
 def _get_device(model: torch.nn.Module, override: Optional[torch.device] = None) -> torch.device:
@@ -510,3 +561,28 @@ def _plot_reconstructed_images(reconstructed_images: torch.Tensor, file_name: Pa
     plt.close()
 
     print(f"Reconstructed images saved to {file_name}")
+
+
+def _get_latent_representations(model, train_dataloader):
+    model_device = _get_device(model)
+
+    model.to(model_device)
+    model.eval()
+
+    with torch.no_grad():
+        all_mu = []
+        all_L = []
+
+        for images in train_dataloader:
+            images = images.to(model_device)
+
+            # Forward pass
+            _, mu, L = model(images)
+
+            all_mu.append(mu.cpu())
+            all_L.append(L.cpu())
+
+        all_mu_tensor = torch.cat(all_mu, dim=0)
+        all_L_tensor = torch.cat(all_L, dim=0)
+
+    return all_mu_tensor, all_L_tensor

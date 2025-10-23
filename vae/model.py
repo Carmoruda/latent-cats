@@ -2,6 +2,7 @@ from pathlib import Path
 from typing import Optional, Union
 
 import torch
+from sklearn.mixture import GaussianMixture
 from torch.nn import functional as F
 
 DEVICE = None
@@ -40,7 +41,7 @@ class VAE(torch.nn.Module):
         self.latent_dim: int = latent_dim
         self.n_components: int = n_components
         self.beta: float = beta
-        self.gmm = None
+        self.gmm: GaussianMixture
 
         super(VAE, self).__init__()
 
@@ -55,16 +56,16 @@ class VAE(torch.nn.Module):
         )
 
         # Layers for the mean and log-variance of the latent space
-        self.fc_mu = torch.nn.Linear(128 * 8 * 8, latent_dim)
+        self.fc_mu = torch.nn.Linear(128 * 16 * 16, latent_dim)
         self.fc_L_params = torch.nn.Sequential(
-            torch.nn.Linear(128 * 8 * 8, latent_dim * (latent_dim + 1) // 2),
+            torch.nn.Linear(128 * 16 * 16, latent_dim * (latent_dim + 1) // 2),
             torch.nn.LayerNorm(latent_dim * (latent_dim + 1) // 2),
         )
 
         # Decoder
-        self.decoder_input = torch.nn.Linear(latent_dim, 128 * 8 * 8)
+        self.decoder_input = torch.nn.Linear(latent_dim, 128 * 16 * 16)
         self.decoder = torch.nn.Sequential(
-            torch.nn.Unflatten(1, (128, 8, 8)),
+            torch.nn.Unflatten(1, (128, 16, 16)),
             torch.nn.ConvTranspose2d(
                 128, 64, kernel_size=3, stride=2, padding=1, output_padding=1
             ),
