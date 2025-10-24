@@ -41,34 +41,44 @@ By default, `main.py` instantiates `VAEDataset` with `download=False`, so it exp
 Ensure `data/` only contains image files (`.png`, `.jpg`, `.jpeg`, `.bmp`, `.gif`). The dataset loader raises a descriptive error if no images are found.
 
 ### Configuration
-Training parameters live in `configs/local.yaml`. The loader builds a typed `Config` object, so any edits to the YAML are validated and converted to the right types (paths, ints, floats, booleans).
+All runtime options live in `configs/local.yaml`. At startup `main.py` loads this file, materialises a typed configuration object, resolves the `data_dir` / `output_dir` paths to absolute locations relative to the repository, and creates the folders if they do not exist. Any change you make to the YAML is validated on load, so typos surface early.
 
-Key fields you can tune:
-- `data_dir`, `output_dir`: Relative or absolute paths; created automatically if missing.
-- `batch_size`, `learning_rate`, `latent_dim`, `epochs`, `beta`: Optimization knobs passed into the trainer.
-- `image_size`: Images are center-cropped/resized to this square resolution.
-- `seed`: Set to `null` to disable seeding; otherwise reproducible runs.
-- `download`: Flip to `true` to let the dataset helper fetch the Kaggle archive.
+#### Default configuration (`configs/local.yaml`)
 
-Edit the YAML before running `python main.py`. You can also derive alternative configs by copying `configs/local.yaml` (e.g., `configs/experiment.yaml`) and updating the path inside `main.py` or your own launcher script.
+| Key | Default | What it controls |
+| --- | --- | --- |
+| `data_dir` | `data` | Folder that must contain the training images. Point it elsewhere if your dataset lives outside the repo. |
+| `output_dir` | `output` | Destination for reconstructions, generated samples, and any future reports. |
+| `batch_size` | `128` | Mini-batch size used for all dataloaders. Lower it if you are memory constrained. |
+| `learning_rate` | `1e-3` | Adam learning rate passed to the optimiser. |
+| `latent_dim` | `128` | Size of the latent space for the VAE encoder/decoder. |
+| `beta` | `1e-4` | Weight applied to the KL term inside the VAE loss. Use this to trade-off reconstruction quality vs. latent regularisation. |
+| `epochs` | `10` | Number of full passes through the training split. |
+| `image_size` | `128` | Final square resolution (in pixels) after grayscale + resize transforms. |
+| `seed` | `57` | When set, seeds PyTorch, NumPy, and dataloader shuffling for reproducibility. Set to `null` to disable seeding. |
+| `download` | `False` | Switch to `true` to allow automatic retrieval of the Kaggle cats dataset using your `KAGGLE_USERNAME`/`KAGGLE_KEY`. |
+
+Additional knobs such as the GMM component count (`n_components`, default `10`) and the balanced subset length (`length`) are configurable programmatically; add them to the YAML if you need to override the defaults handled in `utils/training.py`.
+
+To run with a different profile, copy `configs/local.yaml`, edit the values, and either update the path in `main.py` or pass the file to your own launcher that calls `load_config_from_yaml`.
 
 ## Usage
-### Train the VAE
+### Run a local training session
+1. Activate your environment and install dependencies (see Installation).
+2. Update `configs/local.yaml` to match your data location and desired hyperparameters.
+3. Place cat images inside the folder referenced by `data_dir`, or set `download: true` and make sure Kaggle credentials are exported.
+4. Launch training:
 ```bash
 python main.py
 ```
-The script will:
-- create train/validation/test splits (80/10/10),
-- train for the configured number of epochs (`epochs` in `train_vae`),
-- write `output/reconstructions.png` with original vs. reconstructed samples,
-- fit a GMM on the latent space using the training split,
-- and save `output/generated.png` with images sampled from the latent space (GMM-driven when available).
+During the run the pipeline will:
+- split the dataset into train/validation/test (80/10/10) using the configured seed,
+- train for the requested number of `epochs` while printing loss stats,
+- persist reconstructions to `output/reconstructions.png`,
+- fit a latent-space Gaussian Mixture Model on the training split,
+- and sample new cats into `output/generated.png`.
 
-Key hyperparameters live in `main.py`:
-- `lr`: Adam learning rate.
-- `latent_dim`: Latent space dimensionality.
-- `epochs`: Number of training epochs.
-Adjust them directly or wire in a configuration loader if needed.
+If you want to override parameters on the fly, update the YAML and re-run. For ad-hoc experiments you can also adapt the dictionary passed to `train_vae` inside `main.py`.
 
 ### Hyperparameter Tuning
 Uncomment the `hyperparameter_tuning()` call in `main.py` to launch a Ray Tune sweep across learning rate, latent dimension, and epoch counts. Results are reported to the Ray dashboard (if running) and the best configuration is printed on completion. You can refine the search space or scheduler strategy in `hyperparameter_tuning()`.
