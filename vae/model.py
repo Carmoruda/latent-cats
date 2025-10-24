@@ -47,11 +47,11 @@ class VAE(torch.nn.Module):
 
         # Encoder: Convolutional layers that compress the image
         self.encoder = torch.nn.Sequential(
-            torch.nn.Conv2d(1, 32, kernel_size=3, stride=2, padding=1),
+            torch.nn.Conv2d(1, 32, kernel_size=4, stride=2, padding=1),
             torch.nn.ReLU(),
-            torch.nn.Conv2d(32, 64, kernel_size=3, stride=2, padding=1),
+            torch.nn.Conv2d(32, 64, kernel_size=4, stride=2, padding=1),
             torch.nn.ReLU(),
-            torch.nn.Conv2d(64, 128, kernel_size=3, stride=2, padding=1),
+            torch.nn.Conv2d(64, 128, kernel_size=4, stride=2, padding=1),
             torch.nn.Flatten(),
         )
 
@@ -66,19 +66,17 @@ class VAE(torch.nn.Module):
         self.decoder_input = torch.nn.Linear(latent_dim, 128 * 16 * 16)
         self.decoder = torch.nn.Sequential(
             torch.nn.Unflatten(1, (128, 16, 16)),
-            torch.nn.ConvTranspose2d(
-                128, 64, kernel_size=3, stride=2, padding=1, output_padding=1
-            ),
-            torch.nn.ReLU(),
-            torch.nn.ConvTranspose2d(
-                64, 32, kernel_size=3, stride=2, padding=1, output_padding=1
-            ),
-            torch.nn.ReLU(),
-            torch.nn.ConvTranspose2d(
-                32, 1, kernel_size=3, stride=2, padding=1, output_padding=1
-            ),
-            torch.nn.Sigmoid(),  # Output values between [0, 1]
+            torch.nn.Upsample(scale_factor=2, mode="bilinear", align_corners=False),
+            torch.nn.Conv2d(128, 64, kernel_size=3, padding=1),
+            torch.nn.ReLU(inplace=True),
+            torch.nn.Upsample(scale_factor=2, mode="bilinear", align_corners=False),
+            torch.nn.Conv2d(64, 32, kernel_size=3, padding=1),
+            torch.nn.ReLU(inplace=True),
+            torch.nn.Upsample(scale_factor=2, mode="bilinear", align_corners=False),
+            torch.nn.Conv2d(32, 1, kernel_size=3, padding=1),
+            torch.nn.Sigmoid(),  # Mantiene la salida en [0, 1]
         )
+
 
     def reparameterize(
         self, mu: torch.Tensor, L_params: torch.Tensor
@@ -114,11 +112,13 @@ class VAE(torch.nn.Module):
         L = torch.zeros(batch_size, self.latent_dim, self.latent_dim, device=L_params.device)
 
         # Get the indices for the lower-triangular part
-        row_idx, col_idx = torch.tril_indices(row=self.latent_dim, col=self.latent_dim, offset=0)
+        row_idx, col_idx = torch.tril_indices(
+            row=self.latent_dim, col=self.latent_dim, offset=0, device=L_params.device
+        )
         L[:, row_idx, col_idx] = L_params
 
         # Enforce a positive diagonal for numerical stability.
-        diag_idx = torch.arange(self.latent_dim)
+        diag_idx = torch.arange(self.latent_dim, device=L_params.device)
         L[:, diag_idx, diag_idx] = torch.exp(L[:, diag_idx, diag_idx])
 
         return L

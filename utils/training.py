@@ -8,6 +8,7 @@ import numpy as np
 import torch
 import torch.nn.functional as F
 from sklearn.mixture import GaussianMixture
+from sklearn.mixture._gaussian_mixture import _compute_precision_cholesky # type: ignore[attr-defined]
 from torch.optim.lr_scheduler import ReduceLROnPlateau
 from torch.utils.data import DataLoader, Dataset, Subset, random_split
 from torchvision import transforms
@@ -388,7 +389,7 @@ def get_reconstructions(
     _plot_reconstructed_images(reconstructed_images, file_name)
 
 
-def sample_from_latent_space(mu, L, device):
+def sample_from_latent_space(mu, L, device: Optional[torch.device] = None):
     """
     Sample latent vectors z from the multivariate Gaussian distribution
     defined by the encoder outputs (μ, L).
@@ -396,12 +397,16 @@ def sample_from_latent_space(mu, L, device):
     Args:
         mu (torch.Tensor): Latent means of shape (N, D)
         L (torch.Tensor): Cholesky factors of the covariance matrices, shape (N, D, D)
-        device (str): 'cpu' or 'cuda'
+        device (Optional[torch.device]): Target device for the sampled latent vectors. Defaults to the device of ``mu``.
 
     Returns:
         torch.Tensor: Sampled latent vectors z of shape (N, D)
     """
-    epsilon = torch.randn_like(mu).to(device)  # Standard Gaussian noise ε ~ N(0, I)
+    target_device = device if device is not None else mu.device
+    mu = mu.to(target_device)
+    L = L.to(target_device)
+
+    epsilon = torch.randn(mu.size(0), mu.size(1), device=target_device, dtype=mu.dtype)
     z = mu + torch.bmm(L, epsilon.unsqueeze(-1)).squeeze(-1)  # Reparameterization: z = μ + L·ε
     return z
 
@@ -426,34 +431,32 @@ def gmm(model: VAE, train_dataloader: DataLoader) -> None:
     model.eval()
 
     with torch.no_grad():
-        mu, L = _get_latent_representations(model, train_dataloader)
+        mu, L = _get_latent_representations(model, train_dataloader, device=model_device)
+        _, D = mu.shape
 
-        N, D = mu.shape
-
-        # Convert tensors to NumPy arrays for sklearn compatibility
-        mu_cpu = mu.detach().cpu()
-        L_cpu = L.detach().cpu()
-        mu_np = mu_cpu.numpy()
-        L_np = L_cpu.numpy()
-
-        # Compute full covariance matrices: Σ_i = L_i * L_iᵀ
-        cov_np = np.matmul(L_np, np.transpose(L_np, (0, 2, 1)))
+        # Compute full covariance matrices: Σ_i = L_i * L_iᵀ on the model device
+        cov = torch.matmul(L, L.transpose(-1, -2))
 
         # Add small regularization to the diagonal for numerical stability
         eps = 1e-6
-        cov_np += np.eye(D)[None, :, :] * eps
+        cov = cov + eps * torch.eye(D, device=model_device, dtype=cov.dtype).unsqueeze(0)
 
-        cpu_device = torch.device("cpu")
-        z_tensor = sample_from_latent_space(mu_cpu, L_cpu, cpu_device).cpu()
-        z_samples = z_tensor.numpy()
+
+        # Move data to CPU for sklearn compatibility
+        mu_cpu = mu.detach().cpu()
+        cov_cpu = cov.detach().cpu()
 
         # Initialize Gaussian Mixture Model with N components (one per photo)
-        gmm = GaussianMixture(n_components=model.n_components, covariance_type="full").fit(z_samples)
+        gmm = GaussianMixture(n_components=model.n_components, covariance_type="full")
         gmm.weights_ = (
             np.ones(model.n_components) / model.n_components  # Equal weights for all components
         )
-        gmm.means_ = mu_np  # Component means
-        gmm.covariances_ = cov_np  # Full covariances per component
+        gmm.means_ = mu_cpu.numpy()  # Component means
+        gmm.covariances_ = cov_cpu.numpy()  # Full covariances per component
+
+        precisions_cholesky = _compute_precision_cholesky(gmm.covariances_, "full")
+        gmm.precisions_cholesky_ = precisions_cholesky
+        gmm.precisions_ = np.matmul(precisions_cholesky, precisions_cholesky.transpose(0, 2, 1))
 
         model.gmm = gmm  # Store GMM in the model for later use
 
@@ -573,8 +576,13 @@ def _plot_reconstructed_images(reconstructed_images: torch.Tensor, file_name: Pa
     print(f"Reconstructed images saved to {file_name}")
 
 
-def _get_latent_representations(model, train_dataloader):
-    model_device = _get_device(model)
+def _get_latent_representations(
+    model: torch.nn.Module,
+    train_dataloader: DataLoader,
+    *,
+    device: Optional[torch.device] = None,
+) -> tuple[torch.Tensor, torch.Tensor]:
+    model_device = _get_device(model, device)
 
     model.to(model_device)
     model.eval()
@@ -589,8 +597,8 @@ def _get_latent_representations(model, train_dataloader):
             # Forward pass
             _, mu, L = model(images)
 
-            all_mu.append(mu.cpu())
-            all_L.append(L.cpu())
+            all_mu.append(mu.detach())
+            all_L.append(L.detach())
 
         all_mu_tensor = torch.cat(all_mu, dim=0)
         all_L_tensor = torch.cat(all_L, dim=0)
