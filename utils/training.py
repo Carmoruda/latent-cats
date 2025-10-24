@@ -8,7 +8,9 @@ import numpy as np
 import torch
 import torch.nn.functional as F
 from sklearn.mixture import GaussianMixture
-from sklearn.mixture._gaussian_mixture import _compute_precision_cholesky # type: ignore[attr-defined]
+from sklearn.mixture._gaussian_mixture import (
+    _compute_precision_cholesky,  # type: ignore[attr-defined]
+)
 from torch.optim.lr_scheduler import ReduceLROnPlateau
 from torch.utils.data import DataLoader, Dataset, Subset, random_split
 from torchvision import transforms
@@ -441,7 +443,6 @@ def gmm(model: VAE, train_dataloader: DataLoader) -> None:
         eps = 1e-6
         cov = cov + eps * torch.eye(D, device=model_device, dtype=cov.dtype).unsqueeze(0)
 
-
         # Move data to CPU for sklearn compatibility
         mu_cpu = mu.detach().cpu()
         cov_cpu = cov.detach().cpu()
@@ -582,6 +583,16 @@ def _get_latent_representations(
     *,
     device: Optional[torch.device] = None,
 ) -> tuple[torch.Tensor, torch.Tensor]:
+    """Get the latent representations from the model.
+
+    Args:
+        model (torch.nn.Module): The model to use for extraction.
+        train_dataloader (DataLoader): The dataloader for the training data.
+        device (Optional[torch.device], optional): The device to use for computation. Defaults to None.
+
+    Returns:
+        tuple[torch.Tensor, torch.Tensor]: The latent representations (mu) and their log variances (L).
+    """
     model_device = _get_device(model, device)
 
     model.to(model_device)

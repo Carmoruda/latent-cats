@@ -9,6 +9,25 @@ import yaml
 
 @dataclass(frozen=True)
 class Config:
+    """Class representing the configuration for the VAE model.
+
+    Attributes:
+        data_dir (Path): Directory for input data.
+        output_dir (Path): Directory for output data.
+        batch_size (int): Batch size for training.
+        learning_rate (float): Learning rate for the optimizer.
+        latent_dim (int): Dimensionality of the latent space.
+        beta (float): Weight for the KL divergence term.
+        epochs (int): Number of training epochs.
+        image_size (int): Size of the input images (assumed square).
+        seed (int): Random seed for reproducibility.
+        download (bool): Whether to download the dataset if not present.
+
+    Raises:
+        TypeError: If a field is not of the expected type.
+        ValueError: If a field is not valid.
+    """
+
     data_dir: Path = Path("data")
     output_dir: Path = Path("output")
     batch_size: int = 64

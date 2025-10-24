@@ -4,13 +4,15 @@ from typing import Any, Mapping
 import torch.nn.functional as F
 from ray import train, tune
 from ray.tune.schedulers import ASHAScheduler
+from torch.utils.data import DataLoader
 
 from utils import load_config_from_yaml, seed_everything
 from utils import training as training_utils
+from vae import VAE
 from vae.model import DEVICE
 
 
-def train_vae(config: Mapping[str, Any], report=True):
+def train_vae(config: Mapping[str, Any], report=True) -> tuple[VAE, DataLoader, DataLoader]:
     """ "Train a VAE model based on the provided configuration.
 
     Args:
@@ -18,7 +20,7 @@ def train_vae(config: Mapping[str, Any], report=True):
         report (bool, optional): Whether to report intermediate results. Defaults to True.
 
     Returns:
-        tuple[CVAE, DataLoader, DataLoader]: The trained model and the dataloaders.
+        tuple[VAE, DataLoader, DataLoader]: The trained model and the dataloaders.
     """
 
     data_dir = Path(__file__).parent / "data"
@@ -37,7 +39,9 @@ def train_vae(config: Mapping[str, Any], report=True):
     return model, test_dataloader, train_dataloader
 
 
-def hyperparameter_tuning():
+def hyperparameter_tuning() -> None:
+    """Perform hyperparameter tuning for the VAE model."""
+
     # Define the search space for hyperparameters
     search_space = {
         "lr": tune.grid_search([1e-3, 1e-4, 1e-5]),

@@ -22,6 +22,14 @@ class VAE(torch.nn.Module):
 
     Args:
         torch (Module): PyTorch module.
+
+    Attributes:
+        latent_dim (int): Dimension of the latent space.
+        n_components (int): Number of components for the Gaussian Mixture Model.
+        beta (float): Weight for the KL divergence loss term.
+        gmm (GaussianMixture): Gaussian Mixture Model for the latent space.
+        device (torch.device): Device where the model is located.
+
     """
 
     def __init__(
@@ -76,7 +84,6 @@ class VAE(torch.nn.Module):
             torch.nn.Conv2d(32, 1, kernel_size=3, padding=1),
             torch.nn.Sigmoid(),  # Mantiene la salida en [0, 1]
         )
-
 
     def reparameterize(
         self, mu: torch.Tensor, L_params: torch.Tensor
