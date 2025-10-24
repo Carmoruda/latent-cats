@@ -6,7 +6,7 @@ This project trains a convolutional Variational Autoencoder (VAE) on cat images 
 
 ![Variational Autoencoder architecture diagram placeholder](docs/Architecture.png)
 
-The model follows an encoder-decoder CNN layout: grayscale cat images pass through stacked convolutional blocks that compress them into a latent vector of size `latent_dim`; the decoder mirrors this structure with transposed convolutions to reconstruct the inputs. A Gaussian Mixture Model is fitted on the latent vectors after training to support guided sampling. Replace `docs/architecture.png` with your own diagram (or update the path) to visualise the flow in documentation.
+The model follows an encoder-decoder CNN layout: grayscale cat images pass through stacked convolutional blocks that compress them into a latent vector of size `latent_dim`; the decoder mirrors this structure with transposed convolutions to reconstruct the inputs. A Gaussian Mixture Model is fitted on the latent vectors after training to support guided sampling.
 
 ## Features
 
