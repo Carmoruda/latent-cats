@@ -2,6 +2,11 @@
 
 This project trains a convolutional Variational Autoencoder (VAE) on cat images and augments its latent space with a Gaussian Mixture Model (GMM) to synthesize new samples. It includes utilities to split the dataset, monitor validation loss, and optionally run large-scale hyperparameter sweeps with Ray Tune.
 
+## Architecture
+![Variational Autoencoder architecture diagram placeholder](docs/architecture.png)
+
+The model follows an encoder-decoder CNN layout: grayscale cat images pass through stacked convolutional blocks that compress them into a latent vector of size `latent_dim`; the decoder mirrors this structure with transposed convolutions to reconstruct the inputs. A Gaussian Mixture Model is fitted on the latent vectors after training to support guided sampling. Replace `docs/architecture.png` with your own diagram (or update the path) to visualise the flow in documentation.
+
 ## Features
 - Convolutional VAE with configurable latent dimensionality.
 - Automatic device selection (CUDA, Apple MPS, or CPU).
