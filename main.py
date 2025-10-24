@@ -120,6 +120,8 @@ if __name__ == "__main__":
             "batch_size": config.batch_size,
             "seed": config.seed,
             "download": config.download,
+            "n_components": config.n_components,
+            "image_size": config.image_size,
         },
         False,
     )

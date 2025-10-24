@@ -22,6 +22,7 @@ class Config:
         image_size (int): Size of the input images (assumed square).
         seed (int): Random seed for reproducibility.
         download (bool): Whether to download the dataset if not present.
+        n_components (int): Number of components for the Gaussian Mixture Model.
 
     Raises:
         TypeError: If a field is not of the expected type.
@@ -35,9 +36,10 @@ class Config:
     latent_dim: int = 128
     beta: float = 1e-3
     epochs: int = 20
-    image_size: int = 100
+    image_size: int = 64
     seed: int = 42
     download: bool = False
+    n_components: int = 10
 
     def with_updates(self, **updates: Any) -> Config:
         """Return a new Config instance with updated fields.
