@@ -46,10 +46,10 @@ The pinned versions cover PyTorch, TorchVision, Ray Tune, scikit-learn, matplotl
 
 ### Dataset Setup
 
-By default, `main.py` instantiates `VAEDataset` with `download=False`, so it expects images to already be present under `data/`.
+By default, `configs/local.yaml` instantiates `VAEDataset` with `download: True`, so it expects images to already be present under `data/`.
 
 1. **Manual download:** Obtain the [Kaggle Cats dataset](https://www.kaggle.com/borhanitrash/cat-dataset) manually and extract the images into the `data/` directory.
-2. **Automatic download:** Set `download=True` when constructing `VAEDataset` (see `main.py`) and make sure your Kaggle API credentials are available as environment variables (`KAGGLE_USERNAME`, `KAGGLE_KEY`). The helper will download the archive, extract images, and clean up temporary files.
+2. **Automatic download:** Set `download;True` in `configs/local.yaml`. The helper will download the archive, extract images, and clean up temporary files.
 
 Ensure `data/` only contains image files (`.png`, `.jpg`, `.jpeg`, `.bmp`, `.gif`). The dataset loader raises a descriptive error if no images are found.
 
