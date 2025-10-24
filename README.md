@@ -7,6 +7,7 @@ This project trains a convolutional Variational Autoencoder (VAE) on cat images 
 - Automatic device selection (CUDA, Apple MPS, or CPU).
 - Train/validation/test split with reconstruction visualizations saved to disk.
 - Optional Gaussian Mixture Model fitting on the latent space for guided sampling.
+- YAML-driven training configuration with type-safe overrides.
 - Ray Tune integration for hyperparameter exploration using an ASHA scheduler.
 
 ## Project Structure
@@ -38,6 +39,18 @@ By default, `main.py` instantiates `VAEDataset` with `download=False`, so it exp
 2. **Automatic download:** Set `download=True` when constructing `VAEDataset` (see `main.py`) and make sure your Kaggle API credentials are available as environment variables (`KAGGLE_USERNAME`, `KAGGLE_KEY`). The helper will download the archive, extract images, and clean up temporary files.
 
 Ensure `data/` only contains image files (`.png`, `.jpg`, `.jpeg`, `.bmp`, `.gif`). The dataset loader raises a descriptive error if no images are found.
+
+### Configuration
+Training parameters live in `configs/local.yaml`. The loader builds a typed `Config` object, so any edits to the YAML are validated and converted to the right types (paths, ints, floats, booleans).
+
+Key fields you can tune:
+- `data_dir`, `output_dir`: Relative or absolute paths; created automatically if missing.
+- `batch_size`, `learning_rate`, `latent_dim`, `epochs`, `beta`: Optimization knobs passed into the trainer.
+- `image_size`: Images are center-cropped/resized to this square resolution.
+- `seed`: Set to `null` to disable seeding; otherwise reproducible runs.
+- `download`: Flip to `true` to let the dataset helper fetch the Kaggle archive.
+
+Edit the YAML before running `python main.py`. You can also derive alternative configs by copying `configs/local.yaml` (e.g., `configs/experiment.yaml`) and updating the path inside `main.py` or your own launcher script.
 
 ## Usage
 ### Train the VAE
